@@ -1,0 +1,279 @@
+<!doctype html>
+
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Générateur de Logos Intelligents — BENGZ</title>
+  <style>
+    :root{--bg:#0f1724;--card:#0b1220;--muted:#9aa4b2;--accent:#06b6d4}
+    html,body{height:100%;margin:0;font-family:Inter,Segoe UI,Roboto,Arial;color:#e6eef6;background:linear-gradient(180deg,#071027 0%, #071829 100%);}
+    .wrap{max-width:980px;margin:28px auto;padding:20px;background:rgba(255,255,255,0.02);border-radius:12px;box-shadow:0 8px 30px rgba(2,6,23,0.6)}
+    header{display:flex;gap:16px;align-items:center}
+    header h1{font-size:20px;margin:0}
+    .grid{display:grid;grid-template-columns:360px 1fr;gap:18px;margin-top:18px}
+    .card{background:var(--card);padding:14px;border-radius:10px}
+    label{display:block;font-size:13px;color:var(--muted);margin-bottom:6px}
+    input[type=text], select{width:100%;padding:8px;border-radius:6px;border:1px solid rgba(255,255,255,0.06);background:transparent;color:inherit}
+    .row{display:flex;gap:10px}
+    .btn{padding:8px 12px;border-radius:8px;border:0;background:var(--accent);color:#021124;cursor:pointer}
+    canvas{background:linear-gradient(180deg,#ffffff05,#00000005);display:block;border-radius:12px;margin:auto}
+    .templates button{display:block;width:100%;text-align:left;padding:8px;border-radius:6px;margin-bottom:8px;background:transparent;border:1px solid rgba(255,255,255,0.04);color:var(--muted);cursor:pointer}
+    .small{font-size:13px;color:var(--muted)}
+    footer{margin-top:14px;font-size:13px;color:var(--muted)}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <svg width="40" height="40" viewBox="0 0 24 24" fill="none" style="filter:drop-shadow(0 4px 12px rgba(0,0,0,0.6))"><rect x="1" y="1" width="22" height="22" rx="6" fill="#06b6d4"/><text x="12" y="16" text-anchor="middle" font-size="11" font-family="Arial" fill="#021124">B</text></svg>
+      <div>
+        <h1>Générateur de Logos Intelligents</h1>
+        <div class="small">Choisis un modèle, personnalise les couleurs, le texte — clique télécharger.</div>
+      </div>
+    </header><div class="grid">
+  <aside class="card">
+    <label>Nom / Texte (ex: BENGZ)</label>
+    <input id="textInput" type="text" value="BENGZ" />
+
+    <label>Template</label>
+    <div class="templates">
+      <button data-template="shield">Shield / Bouclier</button>
+      <button data-template="monogram">Monogramme / Initiales</button>
+      <button data-template="star">Star / Étoile</button>
+      <button data-template="crest">Crest / Emblème</button>
+      <button data-template="minimal">Minimal</button>
+    </div>
+
+    <label>Couleur principale</label>
+    <input id="primaryColor" type="color" value="#06b6d4" />
+
+    <label>Couleur secondaire</label>
+    <input id="secondaryColor" type="color" value="#02263a" />
+
+    <label>Forme du badge</label>
+    <select id="shape">
+      <option value="circle">Cercle</option>
+      <option value="square">Carré</option>
+      <option value="rounded">Rounded</option>
+    </select>
+
+    <div style="height:10px"></div>
+    <div class="row">
+      <button id="generateBtn" class="btn">Générer</button>
+      <button id="downloadBtn" class="btn" style="background:#34d399">Télécharger PNG</button>
+    </div>
+
+    <div style="height:10px"></div>
+    <div class="small">Astuce: utilise des contrastes forts pour un logo lisible. Les templates s'inspirent des logos de foot/héros mais ne les reproduisent pas.</div>
+  </aside>
+
+  <main class="card">
+    <canvas id="logoCanvas" width="800" height="800"></canvas>
+  </main>
+</div>
+
+<footer>Code fourni — personnalise les formes, ajoute tes propres SVG si tu veux un résultat unique.</footer>
+
+  </div>  <script>
+    // Générateur de logo basique mais "intelligent" : composition algorithmique
+    const canvas = document.getElementById('logoCanvas');
+    const ctx = canvas.getContext('2d');
+    const textInput = document.getElementById('textInput');
+    const primaryColor = document.getElementById('primaryColor');
+    const secondaryColor = document.getElementById('secondaryColor');
+    const shapeSel = document.getElementById('shape');
+    const generateBtn = document.getElementById('generateBtn');
+    const downloadBtn = document.getElementById('downloadBtn');
+
+    // Template buttons
+    document.querySelectorAll('.templates button').forEach(b=>{
+      b.addEventListener('click', ()=>{
+        document.querySelectorAll('.templates button').forEach(x=>x.style.borderColor='');
+        b.style.borderColor='rgba(255,255,255,0.18)';
+        canvas.dataset.template = b.dataset.template;
+      })
+    });
+
+    // Default template
+    canvas.dataset.template = 'shield';
+
+    function clear(){
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+      // subtle background grid for preview
+      ctx.fillStyle = 'rgba(255,255,255,0.02)';
+      ctx.fillRect(0,0,canvas.width,canvas.height);
+    }
+
+    // utility: draw rounded rect
+    function roundRect(x,y,w,h,r){
+      ctx.beginPath();
+      ctx.moveTo(x+r,y);
+      ctx.arcTo(x+w,y,x+w,y+h,r);
+      ctx.arcTo(x+w,y+h,x,y+h,r);
+      ctx.arcTo(x,y+h,x,y,r);
+      ctx.arcTo(x,y,x+w,y,r);
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    function drawBadge(shape, px, sx){
+      const cx = canvas.width/2, cy = canvas.height/2;
+      const size = 420;
+      // outer
+      ctx.save();
+      if(shape==='circle'){
+        ctx.beginPath(); ctx.arc(cx,cy,size/2,0,Math.PI*2); ctx.closePath();
+        ctx.fillStyle = sx; ctx.fill();
+      } else if(shape==='square'){
+        ctx.fillStyle = sx; roundRect(cx-size/2,cy-size/2,size,size,12);
+      } else {
+        // rounded tall
+        ctx.fillStyle = sx; roundRect(cx-size/2,cy-size/2,size,size,80);
+      }
+      // inner
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.beginPath();
+      if(shape==='circle') ctx.arc(cx,cy,size*0.36,0,Math.PI*2);
+      else roundRect(cx-size*0.36,cy-size*0.36,size*0.72,size*0.72,Math.min(60,size*0.36));
+      ctx.closePath(); ctx.fillStyle = px; ctx.fill();
+      ctx.restore();
+    }
+
+    // simple emblem shapes
+    function drawShieldEmblem(){
+      const cx = canvas.width/2, cy = canvas.height/2;
+      ctx.save();
+      ctx.translate(cx,cy-20);
+      // shield path
+      ctx.beginPath();
+      ctx.moveTo(-90,-120);
+      ctx.lineTo(90,-120);
+      ctx.quadraticCurveTo(120,-40,60,40);
+      ctx.quadraticCurveTo(0,120,-60,40);
+      ctx.quadraticCurveTo(-120,-40,-90,-120);
+      ctx.closePath();
+      ctx.fillStyle = 'rgba(255,255,255,0.06)'; ctx.fill();
+      // central symbol (stylised "S")
+      ctx.beginPath();
+      ctx.moveTo(-20,-30);
+      ctx.bezierCurveTo(40,-70,40,10,-10,10);
+      ctx.bezierCurveTo(60,30,10,120,-40,60);
+      ctx.fillStyle = 'rgba(255,255,255,0.9)'; ctx.fill();
+      ctx.restore();
+    }
+
+    function drawMonogram(text){
+      const cx = canvas.width/2, cy = canvas.height/2;
+      ctx.save();
+      ctx.font = 'bold 240px serif';
+      ctx.textAlign = 'center'; ctx.textBaseline='middle';
+      // shadow
+      ctx.fillStyle = 'rgba(0,0,0,0.24)'; ctx.fillText(text, cx+8, cy+12);
+      ctx.fillStyle = 'white'; ctx.fillText(text, cx, cy);
+      ctx.restore();
+    }
+
+    function drawStar(pxcolor){
+      const cx = canvas.width/2, cy = canvas.height/2-20; const R=140;
+      ctx.save(); ctx.beginPath();
+      for(let i=0;i<5;i++){
+        const a = (Math.PI*2/5)*i - Math.PI/2;
+        const x = cx + Math.cos(a)*R;
+        const y = cy + Math.sin(a)*R;
+        ctx.lineTo(x,y);
+        const a2 = a + Math.PI/5;
+        ctx.lineTo(cx + Math.cos(a2)*R*0.45, cy + Math.sin(a2)*R*0.45);
+      }
+      ctx.closePath(); ctx.fillStyle = pxcolor; ctx.fill(); ctx.restore();
+    }
+
+    function drawCrest(px, sx){
+      // combine diagonal stripes + icon
+      const cx = canvas.width/2, cy = canvas.height/2;
+      ctx.save();
+      // stripes
+      ctx.translate(cx,cy);
+      for(let i=-6;i<=6;i++){
+        ctx.beginPath(); ctx.fillStyle = (i%2===0)?px:sx; ctx.rect(i*60-300,-300,40,600); ctx.fill();
+      }
+      ctx.restore();
+      // overlay crest shape
+      ctx.save(); ctx.translate(cx,cy-10);
+      ctx.beginPath(); ctx.moveTo(0,-180); ctx.quadraticCurveTo(140,-70,100,80); ctx.quadraticCurveTo(0,170,-100,80); ctx.quadraticCurveTo(-140,-70,0,-180); ctx.closePath(); ctx.globalCompositeOperation='destination-in'; ctx.fill();
+      ctx.restore(); ctx.globalCompositeOperation='source-over';
+      // simple icon
+      ctx.beginPath(); ctx.arc(cx,cy-40,62,0,Math.PI*2); ctx.fillStyle='rgba(255,255,255,0.92)'; ctx.fill();
+    }
+
+    function drawMinimal(text, px){
+      const cx = canvas.width/2, cy = canvas.height/2;
+      ctx.save(); ctx.font='120px Georgia'; ctx.textAlign='center'; ctx.textBaseline='middle';
+      ctx.fillStyle='rgba(255,255,255,0.9)'; ctx.fillText(text, cx, cy+30);
+      // small chevron
+      ctx.beginPath(); ctx.moveTo(cx-60,cy-60); ctx.lineTo(cx,cy-10); ctx.lineTo(cx+60,cy-60); ctx.fillStyle=px; ctx.fill();
+      ctx.restore();
+    }
+
+    function smartContrast(hex){
+      // return black or white depending on hex
+      if(!hex) return '#fff';
+      const c = hex.replace('#','');
+      const r = parseInt(c.substring(0,2),16), g=parseInt(c.substring(2,4),16), b=parseInt(c.substring(4,6),16);
+      const yiq = ((r*299)+(g*587)+(b*114))/1000;
+      return (yiq>=160) ? '#021124' : '#fff';
+    }
+
+    function generate(){
+      const template = canvas.dataset.template || 'shield';
+      const text = (textInput.value||'BENGZ').toUpperCase();
+      const px = primaryColor.value;
+      const sx = secondaryColor.value;
+      clear();
+      // subtle outer vignette
+      ctx.save();
+      const g = ctx.createLinearGradient(0,0,0,canvas.height); g.addColorStop(0,'rgba(0,0,0,0.02)'); g.addColorStop(1,'rgba(0,0,0,0.04)'); ctx.fillStyle=g; ctx.fillRect(0,0,canvas.width,canvas.height); ctx.restore();
+
+      // draw badge based on shape choice
+      drawBadge(shapeSel.value, px, sx);
+
+      // intelligent emblem selection
+      if(template==='shield'){
+        drawShieldEmblem();
+        // add small text
+        ctx.font='28px sans-serif'; ctx.textAlign='center'; ctx.fillStyle = smartContrast(sx); ctx.fillText(text, canvas.width/2, canvas.height-120);
+      } else if(template==='monogram'){
+        drawMonogram(text.slice(0,2));
+        // small baseline
+        ctx.font='20px sans-serif'; ctx.fillStyle = smartContrast(primaryColor.value); ctx.fillText(text, canvas.width/2, canvas.height-120);
+      } else if(template==='star'){
+        drawStar('#ffffff');
+        ctx.font='44px sans-serif'; ctx.textAlign='center'; ctx.fillStyle = smartContrast(primaryColor.value);
+        ctx.fillText(text, canvas.width/2, canvas.height-60);
+      } else if(template==='crest'){
+        drawCrest(px,sx);
+        ctx.font='30px sans-serif'; ctx.fillStyle = smartContrast(sx); ctx.fillText(text, canvas.width/2, canvas.height-120);
+      } else { // minimal
+        drawMinimal(text, px);
+      }
+
+      // add a tiny signature mark indicating "intelligent" variant (a small halo)
+      ctx.save(); ctx.globalAlpha=0.12; ctx.beginPath(); ctx.arc(canvas.width-80,canvas.height-80,48,0,Math.PI*2); ctx.fillStyle=px; ctx.fill(); ctx.restore();
+    }
+
+    generateBtn.addEventListener('click', generate);
+    // initial draw
+    generate();
+
+    downloadBtn.addEventListener('click', ()=>{
+      const link = document.createElement('a');
+      link.download = (textInput.value||'logo') + '.png';
+      link.href = canvas.toDataURL('image/png');
+      link.click();
+    });
+
+    // quick live update on change
+    [textInput, primaryColor, secondaryColor, shapeSel].forEach(el=>el.addEventListener('input', ()=>{ generate(); }));
+
+  </script></body>
+</html>
