@@ -1,0 +1,440 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Vidéo — L'Origine de BENGZ</title>
+<style>
+  :root{--bg:#071025;--panel:#0f1724;--accent:#ffcc33}
+  html,body{height:100%;margin:0;font-family:Inter,system-ui,Segoe UI,Roboto,Arial;color:#e6eef8;background:linear-gradient(180deg,#02050a,#071025)}
+  .container{max-width:1100px;margin:20px auto;padding:18px;display:grid;grid-template-columns:1fr 340px;gap:14px}
+  .card{background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));border-radius:12px;padding:12px;box-shadow:0 8px 30px rgba(2,6,23,0.6)}
+  h1{margin:0 0 8px 0;font-size:20px}
+  canvas{display:block;border-radius:10px;width:100%;background:#000}
+  .controls{display:flex;flex-direction:column;gap:8px}
+  button{padding:10px;border-radius:8px;border:0;background:linear-gradient(90deg,var(--accent),#ff9a00);color:#071025;font-weight:700;cursor:pointer}
+  .btn-danger{background:linear-gradient(90deg,#ff6b6b,#d00000);color:#fff}
+  label{font-size:13px;color:#9fb8ff}
+  input[type=file]{color:#fff}
+  .small{font-size:13px;color:#9fb8ff}
+  .link{color:#aee8ff;text-decoration:underline;cursor:pointer}
+  footer{margin-top:8px;font-size:12px;color:#8ea6da}
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="card">
+    <h1>🎬 L'Origine de BENGZ — Générateur vidéo</h1>
+    <canvas id="stage" width="1280" height="720" aria-label="Canvas animation"></canvas>
+    <div class="small" style="margin-top:8px">Résolution de rendu : 1280×720. Durée par défaut ~40s. Utilise <strong>Record</strong> pour exporter la vidéo (WebM/MP4 selon navigateur).</div>
+  </div>
+
+  <div class="card controls">
+    <label>Nom pour l'histoire :</label>
+    <input id="txtName" type="text" value="BENGZ" />
+
+    <label>Choisis un symbole (pour la vidéo)</label>
+    <select id="selSymbol">
+      <option value="cross">Croix</option>
+      <option value="sword">Épée</option>
+      <option value="wings">Ailes</option>
+      <option value="flame">Flamme</option>
+      <option value="star">Étoile</option>
+    </select>
+
+    <label>Musique d'ambiance (optionnel) — importer un MP3/OGG</label>
+    <input id="audioFile" type="file" accept="audio/*" />
+
+    <div style="display:flex;gap:8px">
+      <button id="btnPlay">Play</button>
+      <button id="btnPause" class="btn-danger">Pause</button>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:6px">
+      <button id="btnRecord">Record</button>
+      <button id="btnStop" class="btn-danger">Stop</button>
+    </div>
+
+    <div style="margin-top:8px">
+      <label>Lien du fichier exporté :</label>
+      <div id="downloadArea" class="small">Aucun fichier exporté pour le moment.</div>
+    </div>
+
+    <footer>Conseil : pour un rendu plus propre, ferme autres onglets et rends plein écran avant d’enregistrer.</footer>
+  </div>
+</div>
+
+<script>
+/*
+ Page: L'Origine de BENGZ (animation + export)
+ - Canvas animations (timeline de scènes)
+ - Audio: synthé intégré + option d'importer ton audio
+ - Export: MediaRecorder captureStream + audio mix -> WebM file downloadable
+*/
+
+// Canvas setup
+const canvas = document.getElementById('stage');
+const ctx = canvas.getContext('2d');
+
+// UI
+const btnPlay = document.getElementById('btnPlay');
+const btnPause = document.getElementById('btnPause');
+const btnRecord = document.getElementById('btnRecord');
+const btnStop = document.getElementById('btnStop');
+const txtName = document.getElementById('txtName');
+const selSymbol = document.getElementById('selSymbol');
+const audioFile = document.getElementById('audioFile');
+const downloadArea = document.getElementById('downloadArea');
+
+// Timing & timeline
+let startTime = null;
+let paused = true;
+let pauseOffset = 0;
+const DURATION = 40_000; // ms (~40s)
+let animReq = null;
+
+// Audio setup (WebAudio)
+const AudioContext = window.AudioContext || window.webkitAudioContext;
+const audioCtx = new AudioContext();
+let bgGain = audioCtx.createGain();
+bgGain.gain.value = 0.55;
+bgGain.connect(audioCtx.destination);
+
+// Synth background (ambient pad)
+const synthOsc = audioCtx.createOscillator();
+synthOsc.type = 'sine';
+synthOsc.frequency.value = 110;
+const synthGain = audioCtx.createGain();
+synthGain.gain.value = 0.0;
+synthOsc.connect(synthGain);
+synthGain.connect(bgGain);
+synthOsc.start();
+
+// optional imported audio buffer source
+let importedSource = null;
+let importedStreamNode = null;
+let importedAudioBuffer = null;
+
+// Utility: draw rounded rect
+function roundRect(x,y,w,h,r){
+  ctx.beginPath();
+  ctx.moveTo(x+r,y);
+  ctx.arcTo(x+w,y,x+w,y+h,r);
+  ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r);
+  ctx.arcTo(x,y,x+w,y,r);
+  ctx.closePath();
+}
+
+// Helper: draw symbol
+function drawSymbol(sym,x,y,scale,opacity=1, fill='#ffcc33'){
+  ctx.save();
+  ctx.globalAlpha = opacity;
+  ctx.translate(x,y);
+  ctx.scale(scale,scale);
+  ctx.fillStyle = fill;
+  ctx.strokeStyle = 'rgba(0,0,0,0.18)';
+  ctx.lineWidth = 6;
+
+  if(sym==='cross'){
+    ctx.fillRect(-18,-80,36,160);
+    ctx.fillRect(-80,-18,160,36);
+  } else if(sym==='sword'){
+    // simple sword
+    ctx.beginPath();
+    ctx.moveTo(0,-120); ctx.lineTo(12,-20); ctx.lineTo(28,60); ctx.lineTo(-28,60); ctx.lineTo(-12,-20); ctx.closePath(); ctx.fill();
+    ctx.fillRect(-44,60,88,12);
+    ctx.fillRect(-14,60,28,90);
+  } else if(sym==='wings'){
+    // left
+    ctx.beginPath(); ctx.moveTo(-160,0); ctx.quadraticCurveTo(-120,-60,-40,-40); ctx.quadraticCurveTo(-20,-20,-6,0); ctx.fill();
+    // right
+    ctx.beginPath(); ctx.moveTo(160,0); ctx.quadraticCurveTo(120,-60,40,-40); ctx.quadraticCurveTo(20,-20,6,0); ctx.fill();
+    ctx.beginPath(); ctx.arc(0,10,28,0,Math.PI*2); ctx.fill();
+  } else if(sym==='flame'){
+    ctx.beginPath(); ctx.moveTo(0,80); ctx.bezierCurveTo(56,36,56,-40,0,-80); ctx.bezierCurveTo(-36,-40,-36,24,0,80); ctx.fill();
+  } else if(sym==='star'){
+    const spikes=5, outer=80, inner=36;
+    let rot=Math.PI/2*3; let x=0,y= -outer;
+    ctx.beginPath(); ctx.moveTo(0,-outer);
+    for(let i=0;i<spikes;i++){
+      ctx.lineTo(Math.cos(rot)*outer, Math.sin(rot)*outer);
+      rot+=Math.PI/spikes;
+      ctx.lineTo(Math.cos(rot)*inner, Math.sin(rot)*inner);
+      rot+=Math.PI/spikes;
+    }
+    ctx.closePath(); ctx.fill();
+  }
+  ctx.restore();
+}
+
+// Scenes timeline: array of {start,end, render(t) }
+const scenes = [
+  // Scene 1: Opening fade-in, starfield, title
+  {start:0, end:4000, render: (t,tt)=>{
+    // starfield background
+    ctx.fillStyle='#030312';
+    ctx.fillRect(0,0,canvas.width,canvas.height);
+    // moving stars
+    const n=80;
+    for(let i=0;i<n;i++){
+      const x = ((i*97)%canvas.width + tt*0.02*(i%7+1))%canvas.width;
+      const y = ((i*53)%canvas.height + (i%11)*6)%canvas.height;
+      const s = (1 + Math.sin((tt+i)*0.01+i))*0.6;
+      ctx.fillStyle='rgba(255,255,255,'+ (0.12 + 0.6*(i%5)/5 * s) +')';
+      ctx.fillRect(x,y,2,2);
+    }
+    // big title
+    ctx.fillStyle='rgba(255,236,150,' + easeInOut(tt/3000) + ')';
+    ctx.textAlign='center';
+    ctx.font='56px serif';
+    ctx.fillText('L\'Origine de', canvas.width/2, canvas.height*0.36);
+    ctx.font='96px serif';
+    ctx.fillStyle='rgba(255,204,51,' + easeInOut(tt/3000) + ')';
+    ctx.fillText(txtName.value.trim() || 'BENGZ', canvas.width/2, canvas.height*0.48);
+  }},
+  // Scene 2: The vow (Blessing & Eternal)
+  {start:4000, end:11000, render: (t,tt)=>{
+    // dark vignette
+    ctx.fillStyle='#051026';
+    ctx.fillRect(0,0,canvas.width,canvas.height);
+    // left panel with text
+    const pW = canvas.width*0.9;
+    const pH = canvas.height*0.7;
+    const pX = canvas.width*0.05;
+    const pY = canvas.height*0.12;
+    ctx.save();
+    roundRect(pX,pY,pW,pH,18);
+    ctx.fillStyle='rgba(255,255,255,0.02)';
+    ctx.fill();
+    ctx.restore();
+    // text lines (one by one)
+    ctx.fillStyle='rgba(230,238,248,0.95)';
+    ctx.textAlign='left';
+    ctx.font='28px serif';
+    const lines = [
+      'Dans un monde d\'épreuves et d\'ombres, un jeune guerrier se leva.',
+      'Il jura de devenir une bénédiction pour sa famille, un protecteur fidèle.',
+      'Au sommet de son coeur : Dieu — source éternelle de sa force.'
+    ];
+    // appear lines
+    for(let i=0;i<lines.length;i++){
+      const delay = 600*i;
+      const show = Math.max(0, Math.min(1, (tt - delay)/900));
+      ctx.globalAlpha = show;
+      ctx.fillText(lines[i], pX + 38, pY + 80 + i*56);
+    }
+    ctx.globalAlpha = 1;
+    // small symbol on right
+    drawSymbol(selSymbol.value, canvas.width*0.82, canvas.height*0.4, 1.6, Math.min(1, tt/600), '#ffd26a');
+  }},
+  // Scene 3: Nakama & Growth
+  {start:11000, end:19000, render: (t,tt)=>{
+    ctx.fillStyle='#081428'; ctx.fillRect(0,0,canvas.width,canvas.height);
+    // growing tree motif or upward lines
+    const cx = canvas.width/2, cy = canvas.height*0.45;
+    // trunk
+    ctx.fillStyle='rgba(255,223,120,0.95)';
+    ctx.beginPath(); ctx.moveTo(cx-6, cy+160); ctx.quadraticCurveTo(cx-40, cy+40, cx-6, cy-160); ctx.lineTo(cx+6, cy-160); ctx.quadraticCurveTo(cx+40, cy+40, cx+6, cy+160); ctx.closePath(); ctx.fill();
+    // leaves pulses representing growth
+    for(let i=0;i<12;i++){
+      let progress = Math.max(0, Math.min(1, (tt - i*100)/1400));
+      const r = 24 + progress*120;
+      const angle = i/12*Math.PI*2 + (tt*0.001);
+      const lx = cx + Math.cos(angle)*(r*1.1);
+      const ly = cy + Math.sin(angle)*(r*0.5);
+      ctx.globalAlpha = 0.2 + 0.6*easeOut(progress);
+      ctx.beginPath(); ctx.ellipse(lx,ly, r*0.6, r*0.35, angle, 0, Math.PI*2); ctx.fillStyle='rgba(160,220,255,'+ (0.15 + 0.5*(i%3)/3) +')'; ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+    // text
+    ctx.fillStyle='rgba(230,238,248,0.95)';
+    ctx.textAlign='center';
+    ctx.font='36px serif';
+    ctx.fillText('Nakama — protéger les siens', cx, canvas.height*0.68);
+    ctx.fillText('Growth — s\'entraîner sans relâche', cx, canvas.height*0.76);
+  }},
+  // Scene 4: Zero Defeat — trials and rise (animated battle silhouettes)
+  {start:19000, end:30000, render: (t,tt)=>{
+    ctx.fillStyle='#04040b'; ctx.fillRect(0,0,canvas.width,canvas.height);
+    // horizon
+    ctx.fillStyle='#0b1b2b'; ctx.fillRect(0, canvas.height*0.62, canvas.width, canvas.height*0.38);
+    // pulsing sun
+    const sunR = 120 + 40*Math.sin(tt*0.004);
+    const sunCx = canvas.width*0.18; const sunCy = canvas.height*0.3;
+    const g = ctx.createRadialGradient(sunCx,sunCy,sunR*0.1,sunCx,sunCy,sunR*2);
+    g.addColorStop(0,'rgba(255,200,120,0.95)'); g.addColorStop(1,'rgba(255,80,30,0.06)');
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(sunCx,sunCy,sunR*1.6,0,Math.PI*2); ctx.fill();
+    // silhouettes (simple shapes moving)
+    const enemies = 6;
+    for(let i=0;i<enemies;i++){
+      const sx = canvas.width*0.4 + (i-3)*80 + Math.sin(tt*0.003 + i)*18;
+      const sy = canvas.height*0.58 + Math.cos(tt*0.002 + i)*8;
+      ctx.fillStyle='rgba(20,30,40,0.95)'; ctx.beginPath(); ctx.rect(sx-22, sy-80, 44,80); ctx.fill();
+      // helmet
+      ctx.beginPath(); ctx.ellipse(sx, sy-100, 28,20,0,0,Math.PI*2); ctx.fill();
+    }
+    // hero silhouette center (victorious)
+    const hx = canvas.width*0.72, hy = canvas.height*0.52;
+    ctx.fillStyle='rgba(255,220,100,0.96)';
+    ctx.beginPath(); ctx.moveTo(hx,hy-180); ctx.lineTo(hx+36,hy+60); ctx.lineTo(hx-36,hy+60); ctx.closePath(); ctx.fill();
+    // hero shining symbol above
+    drawSymbol(selSymbol.value, hx, hy-220, 1.6, 0.95, '#fff1c6');
+    // text
+    ctx.fillStyle='rgba(255,255,255,0.94)';
+    ctx.font='36px serif'; ctx.textAlign='center';
+    ctx.fillText('Zero Defeat — se relever à chaque chute', canvas.width/2, canvas.height*0.86);
+  }},
+  // Scene 5: Epilogue — banner and motto
+  {start:30000, end:40000, render: (t,tt)=>{
+    // soft gradient
+    const g = ctx.createLinearGradient(0,0,0,canvas.height);
+    g.addColorStop(0,'#071025'); g.addColorStop(1,'#071a2b');
+    ctx.fillStyle = g; ctx.fillRect(0,0,canvas.width,canvas.height);
+    // big emblem center
+    const cx = canvas.width/2, cy = canvas.height/2 - 20;
+    ctx.save();
+    ctx.beginPath();
+    ctx.ellipse(cx,cy,260,360,0,0,Math.PI*2);
+    ctx.fillStyle='rgba(255,255,255,0.03)'; ctx.fill();
+    ctx.restore();
+    drawSymbol(selSymbol.value, cx, cy - 40, 2.2, 1, '#ffd26a');
+    // main name
+    ctx.fillStyle='rgba(255,236,150,0.98)'; ctx.font='72px serif'; ctx.textAlign='center';
+    ctx.fillText(txtName.value.trim() || 'BENGZ', cx, cy + 220);
+    // motto
+    ctx.fillStyle='rgba(230,238,248,0.85)'; ctx.font='22px serif';
+    ctx.fillText('Blessing • Eternal • Nakama • Growth • Zero Defeat', cx, cy + 260);
+    // small shine animation
+    const shineX = cx - 400 + (tt%2000)/2000 * 800;
+    const grad = ctx.createLinearGradient(shineX,cy-400, shineX+120, cy+400);
+    grad.addColorStop(0,'rgba(255,255,255,0.0)'); grad.addColorStop(0.5,'rgba(255,255,255,0.12)'); grad.addColorStop(1,'rgba(255,255,255,0.0)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(cx-400, cy-400, 800, 800);
+  }}
+];
+
+// -----------------------------
+// EASING FUNCTIONS
+function easeInOut(t){ return t<0.5 ? 2*t*t : -1+(4-2*t)*t }
+function easeOut(t){ return 1 - Math.pow(1-t,2) }
+
+// -----------------------------
+// ANIMATION LOOP
+function renderFrame(timestamp){
+  if(!startTime) startTime = timestamp;
+  const elapsed = (timestamp - startTime - pauseOffset);
+  const t = Math.min(elapsed, DURATION);
+
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+
+  // find active scene(s)
+  for(const sc of scenes){
+    if(t >= sc.start && t <= sc.end){
+      const localT = t - sc.start;
+      sc.render(t, localT);
+    }
+  }
+
+  if(t < DURATION && !paused){
+    animReq = requestAnimationFrame(renderFrame);
+  }
+}
+
+// -----------------------------
+// PLAY / PAUSE
+btnPlay.onclick = ()=>{
+  if(paused){
+    paused=false;
+    startTime = performance.now() - pauseOffset;
+    audioCtx.resume();
+    animReq = requestAnimationFrame(renderFrame);
+    synthGain.gain.linearRampToValueAtTime(0.25, audioCtx.currentTime+2);
+  }
+};
+btnPause.onclick = ()=>{
+  if(!paused){
+    paused=true;
+    pauseOffset += performance.now() - startTime;
+    cancelAnimationFrame(animReq);
+    synthGain.gain.linearRampToValueAtTime(0.0, audioCtx.currentTime+1);
+  }
+};
+
+// -----------------------------
+// RECORD / STOP
+let mediaRecorder=null, recordedChunks=[];
+btnRecord.onclick = ()=>{
+  const stream = canvas.captureStream(30); // 30fps
+  const dest = audioCtx.createMediaStreamDestination();
+  bgGain.connect(dest);
+  if(importedStreamNode) importedStreamNode.connect(dest);
+
+  const combined = new MediaStream([...stream.getTracks(), ...dest.stream.getTracks()]);
+  mediaRecorder = new MediaRecorder(combined, {mimeType:"video/webm"});
+  recordedChunks=[];
+  mediaRecorder.ondataavailable = e=>{
+    if(e.data.size>0) recordedChunks.push(e.data);
+  };
+  mediaRecorder.onstop = ()=>{
+    const blob = new Blob(recordedChunks, {type:"video/webm"});
+    const url = URL.createObjectURL(blob);
+    downloadArea.innerHTML = `<a class="link" href="${url}" download="BENGZ-story.webm">Télécharger la vidéo</a>`;
+  };
+  mediaRecorder.start();
+};
+btnStop.onclick = ()=>{ if(mediaRecorder) mediaRecorder.stop(); };
+
+// -----------------------------
+// IMPORT CUSTOM AUDIO
+audioFile.onchange = async ()=>{
+  const file = audioFile.files[0];
+  if(file){
+    const arrBuf = await file.arrayBuffer();
+    importedAudioBuffer = await audioCtx.decodeAudioData(arrBuf);
+    if(importedSource) importedSource.stop();
+    importedSource = audioCtx.createBufferSource();
+    importedSource.buffer = importedAudioBuffer;
+    importedStreamNode = audioCtx.createGain();
+    importedSource.connect(importedStreamNode);
+    importedStreamNode.connect(bgGain);
+    importedSource.loop = true;
+    importedSource.start();
+  }
+};
+// -----------------------------
+// VOIX OFF AUTOMATIQUE DE BENGZ
+
+const narration = [
+  {time:0, text:"L'origine de BENGZ."},
+  {time:5, text:"Dans un monde d'épreuves et d'ombres, un jeune guerrier se leva."},
+  {time:8, text:"Il jura de devenir une bénédiction pour sa famille, un protecteur fidèle."},
+  {time:12, text:"Au sommet de son coeur : Dieu — source éternelle de sa force."},
+  {time:18, text:"Nakama : protéger les siens. Growth : s'entraîner sans relâche."},
+  {time:23, text:"Zero Defeat : se relever à chaque chute."},
+  {time:30, text:"BENGZ — Blessing, Eternal, Nakama, Growth, Zero Defeat."}
+];
+
+let narrationStarted = false;
+
+function startNarration(){
+  if(narrationStarted) return;
+  narrationStarted = true;
+
+  narration.forEach(line=>{
+    setTimeout(()=>{
+      const utter = new SpeechSynthesisUtterance(line.text);
+      utter.lang = "fr-FR";     // langue de la voix
+      utter.rate = 1.0;         // vitesse (0.7 = lent, 1.2 = rapide)
+      utter.pitch = 1.0;        // tonalité (1 = normal)
+      speechSynthesis.speak(utter);
+    }, line.time * 1000);
+  });
+}
+
+// Quand on lance la vidéo → la voix démarre
+btnPlay.addEventListener("click", ()=>{
+  startNarration();
+});
+</script>
+</body>
+</html>
